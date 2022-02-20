@@ -1,6 +1,6 @@
 /*
 
-    An Interpreter for my homemade language, Cent.
+    An Interpreter for my homemade language, Penny.
 
     Reference: https://craftinginterpreters.com/scanning.html
 
@@ -13,11 +13,11 @@
 
     tokens: lexemes, bundled with other data
       - token type
-      - literanl value
+      - literal value
       - location information
 
     lexical grammar: rules that determine how a particular language groups characters into lexemes
-      - most programming languages, the rules of that grammar are simple enough
+      - in most programming languages, the rules of that grammar are simple enough
         for the language to be classified a regular language.
       - tools like Lex or Flex genereate scanners given regexes. Handy!
 
@@ -27,39 +27,71 @@ enum TokenType {
     // Single-character tokens.
     LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE,
     COMMA, DOT, MINUS, PLUS, SEMICOLON, SLASH, STAR,
-  
+
     // One or two character tokens.
     BANG, BANG_EQUAL,
     EQUAL, EQUAL_EQUAL,
     GREATER, GREATER_EQUAL,
     LESS, LESS_EQUAL,
-  
+
     // Literals.
     IDENTIFIER, STRING, NUMBER,
-  
+
     // Keywords.
     AND, CLASS, ELSE, FALSE, FUN, FOR, IF, NIL, OR,
     PRINT, RETURN, SUPER, THIS, TRUE, VAR, WHILE,
-  
+
+    // End of file
     EOF
-  }
+}
 
 interface Token {
     type: TokenType;
     lexeme: string;
-    literal: object;
+    literal: string | number | null;
     line: number;
 };
+
+function tokenFactory(
+    type,
+    lexeme,
+    literal,
+    line
+    ): Token {
+        return {
+            type,
+            lexeme,
+            literal,
+            line
+        }
+}
+
+// An MVP class so that error handling repsonsibilities don't
+// get munged into the interpreter -- keep a line of separation.
+class ErrorHandler {
+    private errors: string[];
+
+    // TODO: Add line number.
+    add(error: string): void {
+        this.errors.push(error);
+    }
+
+    print(): void {
+        console.log(this.errors)
+    }
+}
 
 /*
 
     source code ---> lexeme ---> token ---> repeat from next source code position.
 
     The scanner works its way through the source code, adding tokens until it runs out of characters.
-    Then it appends one final “end of file” token. 
+    Then it appends one final "end of file" token. 
 
 */
 class Scanner {
+    private errorHandler: ErrorHandler;
+
     // tracks what source line current is on so we can produce tokens that know their location
     private line = 1;
     // points at the character currently being considered
@@ -67,13 +99,36 @@ class Scanner {
     private source: string;
     // the first character in the lexeme being scanned
     private start = 0;
+
+    // Store all relevant tokens here.
+    // Not included: comments, white-space, new lines, etc.
     private tokens: Token[];
 
     constructor(source: string) {
         this.source = source;
+        this.errorHandler = new ErrorHandler();
     }
 
-    // Positional methods.
+    keywords = {
+       "and":    TokenType.AND,
+       "class":  TokenType.CLASS,
+       "else":   TokenType.ELSE,
+       "false":  TokenType.FALSE,
+       "for":    TokenType.FOR,
+       "fun":    TokenType.FUN,
+       "if":     TokenType.IF,
+       "nil":    TokenType.NIL,
+       "or":     TokenType.OR,
+       "print":  TokenType.PRINT,
+       "return": TokenType.RETURN,
+       "super":  TokenType.SUPER,
+       "this":   TokenType.THIS,
+       "true":   TokenType.TRUE,
+       "var":    TokenType.VAR,
+       "while":  TokenType.WHILE,
+    }
+
+    // Positional methods
     advance(): string {
         return this.source.charAt(this.current++);
     }
@@ -82,62 +137,219 @@ class Scanner {
         return this.current >= this.source.length;
     }
 
-    // Token methods.
-    addToken(): void {
+    // Token methods
+    addToken(type: TokenType) {
+        this.addTokenLiteral(type, null);
+    }
 
+    addTokenLiteral(type: TokenType, literal: string | number | null) {
+        const text = this.source.substring(this.start, this.current);
+        const token = {
+            type,
+            lexeme: text, // w/quotes
+            literal, // w/o quotes
+            line: this.line
+        };
+
+        this.tokens.push(token)
+    }
+
+    // Lookahead
+    peek() {
+        if (this.isAtEnd()) return '\0';
+        return this.source.charAt(this.current);
+    }
+
+    peekNext() {
+        if (this.current + 1 >= this.source.length) return '\0';
+        return this.source.charAt(this.current + 1);
     }
 
     scanTokens(): Token[] {
         while (!this.isAtEnd()) {
-            // We are at the beginning of the next lexeme.
             this.start = this.current;
             this.scanToken();
         }
 
-        this.tokens.push(new Token(EOF, "", null, this.line));
+        // Add end of file token
+        this.tokens.push(tokenFactory(TokenType.EOF, "", null, this.line));
 
         return this.tokens;
     }
 
-    scanToken():void {
+    // This is where all the action happens.
+    scanToken(): void {
         const c = this.advance();
         switch (c) {
-            case '(': this.addToken(LEFT_PAREN); break;
-            case ')': this.addToken(RIGHT_PAREN); break;
-            case '{': this.addToken(LEFT_BRACE); break;
-            case '}': this.addToken(RIGHT_BRACE); break;
-            case ',': this.addToken(COMMA); break;
-            case '.': this.addToken(DOT); break;
-            case '-': this.addToken(MINUS); break;
-            case '+': this.addToken(PLUS); break;
-            case ';': this.addToken(SEMICOLON); break;
-            case '*': this.addToken(STAR); break;
-            // 2-char lexemes: !, !=, ...
+            //////////////////
+            /// 1-char lexemes
+            case '(': this.addToken(TokenType.LEFT_PAREN); break;
+            case ')': this.addToken(TokenType.RIGHT_PAREN); break;
+            case '{': this.addToken(TokenType.LEFT_BRACE); break;
+            case '}': this.addToken(TokenType.RIGHT_BRACE); break;
+            case ',': this.addToken(TokenType.COMMA); break;
+            case '.': this.addToken(TokenType.DOT); break;
+            case '-': this.addToken(TokenType.MINUS); break;
+            case '+': this.addToken(TokenType.PLUS); break;
+            case ';': this.addToken(TokenType.SEMICOLON); break;
+            case '*': this.addToken(TokenType.STAR); break;
+
+            //////////////////////////////
+            /// 2-char lexemes: !, !=, ...
             case '!':
-                this.addToken(this.match('=') ? BANG_EQUAL : BANG);
+                this.addToken(this.match('=') ? TokenType.BANG_EQUAL : TokenType.BANG);
                 break;
             case '=':
-                this.addToken(this.match('=') ? EQUAL_EQUAL : EQUAL);
+                this.addToken(this.match('=') ? TokenType.EQUAL_EQUAL : TokenType.EQUAL);
                 break;
             case '<':
-                this.addToken(this.match('=') ? LESS_EQUAL : LESS);
+                this.addToken(this.match('=') ? TokenType.LESS_EQUAL : TokenType.LESS);
                 break;
             case '>':
-                this.addToken(this.match('=') ? GREATER_EQUAL : GREATER);
+                this.addToken(this.match('=') ? TokenType.GREATER_EQUAL : TokenType.GREATER);
+                break;
+            case '/':
+                if (this.match('/')) {
+                    ////////////////////////////////////
+                    /// Comments, i.e. whole line lexeme
+                    //  ignored.
+                    //
+                    // A comment goes until the end of the line.
+                    while (this.peek() !== '\n' && !this.isAtEnd()) {
+                        this.advance();
+                    }
+
+                    // Done scanning the comment, then do nothing with it.
+                    // We just need to know when the next lexeme starts,
+                    // and don't really care about the comment or its contents.
+
+                } else {
+                    this.addToken(TokenType.SLASH);
+                }
+                break;
+
+            ///////////////////////////
+            /// Whitespace - ignore it.
+            case ' ':
+            case '\r':
+            case '\t':
+                break;
+
+            ///////////////////////////////////////
+            /// New line - ignore and increment it.
+            case '\n':
+                this.line++;
+                break;
+
+            ///////////////////
+            /// String literals
+            case '"': 
+                this.scanStringLiteral();
+                break;
+
+            ///////////////////
+            /// Number literals
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+                this.scanNumberLiteral();
                 break;
 
             default:
-            // Lox.error(line, "Unexpected character.");
+
+            ////////////////////////////////
+            /// Reserved words & identifiers
+            if (this.isAlpha(c)) {
+                this.identifier();
+            }
+          
+
+            ///////////////////////////////////
+            /// Error case, no char match found
+            //
+            // Delegate to the ErrorHandler, and scan on to the next lexeme.
+            // (Accumulate errors through the scanning process, don't interupt the scan.)
+            this.errorHandler.add("Unexpected character.")
             break;
         }
     }
 
-    match(char, expected) {
+    match(expected: string): boolean {
         if (this.isAtEnd()) return false;
-        if (this.source.charAt(this.current) != expected) return false;
+        if (this.source.charAt(this.current) !== expected) return false;
 
         this.current++;
         return true;
+    }
+
+    scanStringLiteral() {
+        while (this.peek() != '"' && !this.isAtEnd()) {
+            if (this.peek() == '\n') this.line++;
+            this.advance();
+        }
+
+        if (this.isAtEnd()) {
+            // TODO: Add line number: this.line.
+            this.errorHandler.add("Unterminated string.");
+            return;
+        }
+
+        // The closing ".
+        this.advance();
+
+        // Trim the surrounding quotes.
+       const value = this.source.substring(this.start + 1, this.current - 1);
+       this.addTokenLiteral(TokenType.STRING, value);
+    }
+
+    identifier(): void {
+        while (this.isAlphaNumeric(this.peek())) {
+            this.advance();
+        }
+
+        const text = this.source.substring(this.start, this.current);
+        const tokenType: undefined | TokenType = this.keywords[text];
+            
+        this.addToken(tokenType || TokenType.IDENTIFIER);
+    }
+
+    isAlphaNumeric(c: string): boolean {
+        return this.isAlpha(c) || this.isDigit(c);
+    }
+
+    isAlpha(c: string): boolean {
+        const reg = /^[a-zA-Z]*$/;
+        return reg.test(c) || c === '_';
+    }
+    
+    isDigit(c: string): boolean {
+        const reg = /^\d+$/;
+        return reg.test(c);
+    }
+    
+    scanNumberLiteral() {
+        while (this.isDigit(this.peek())) {
+            this.advance();
+        }
+    
+        // Look for a fractional part.
+        if (this.peek() === '.' && this.isDigit(this.peekNext())) {
+            // Consume the "."
+            this.advance();
+    
+            while (this.isDigit(this.peek())) {
+                this.advance();
+            }
+        }
+    
+        this.addTokenLiteral(TokenType.NUMBER, Number(this.source.substring(this.start, this.current)));
     }
 }
 
@@ -229,5 +441,3 @@ class Scanner {
 //       }
 
 // }
-
-    
