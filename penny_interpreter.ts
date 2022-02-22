@@ -4,7 +4,7 @@
 
     Reference: https://craftinginterpreters.com/scanning.html
 
-    Currently in section: 4.5
+    Currently in section: 5.1.2
 
     ///////////////////////////////////////////
     //////// TERMS ////////////////////////////
@@ -266,6 +266,9 @@ class Scanner {
 
             ////////////////////////////////
             /// Reserved words & identifiers
+            //
+            // We've it this far without breaking out,
+            // if you're an alpha char at this point, you are a revserved word or identifier.
             if (this.isAlpha(c)) {
                 this.identifier();
             }
